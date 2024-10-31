@@ -26,14 +26,17 @@ data_collection = "SENTINEL-2"
 #     "-100.42712657761632 31.469326431738068))"
 # )
 
-def create_wkt(lon, lat, length = 10):
+
+def create_wkt(lon, lat, length=10):
     """Create a n x n WKT polygon centered at the given longitude and latitude."""
     """Default to 10m x 10m."""
     # Approximate conversion: 1 degree latitude ≈ 111,320 meters
-    meters_to_degree = length / 111320.0  # turn meters in degrees (~0.0000899 degrees)
+    # turn meters in degrees (~0.0000899 degrees)
+    meters_to_degree = length / 111320.0
 
     # Adjust for the current latitude (longitude degrees shrink towards the poles)
-    lon_adjusted = meters_to_degree / abs(lat) if lat != 0 else meters_to_degree
+    lon_adjusted = meters_to_degree / \
+        abs(lat) if lat != 0 else meters_to_degree
 
     # Calculate the bounding box
     min_lon = lon - lon_adjusted / 2
@@ -52,6 +55,7 @@ def create_wkt(lon, lat, length = 10):
 
     # Return the WKT representation of the polygon
     return polygon.wkt
+
 
 # Example usage
 lon, lat = -100.428, 31.468  # Example coordinates
@@ -81,10 +85,12 @@ def get_keycloak(username: str, password: str) -> str:
     response.raise_for_status()
     return response.json()["access_token"]
 
+
 def get_tile_center(geometry):
     """Calculate the center (longitude, latitude) of the tile."""
     centroid = geometry.centroid
     return round(centroid.x, 6), round(centroid.y, 6)  # Longitude, Latitude
+
 
 def download_tile(session, feat, save_dir):
     """Download a single tile and save it as a .npy file."""
@@ -119,6 +125,7 @@ def download_tile(session, feat, save_dir):
 
     except Exception as e:
         print(f"Error downloading tile {name}: {e}")
+
 
 def download_all_tiles(productDF, save_dir="downloads"):
     """Download all tiles in parallel."""
