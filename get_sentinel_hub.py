@@ -155,7 +155,7 @@ def main(download_folder="downloads"):
 
     # Download images for actual well locations
     # TODO: remove .head(10) to download for all wells
-    for index, row in coordinates_df.head(10).iterrows():
+    for index, row in coordinates_df.head(100).iterrows():
         lon, lat = row['Surface Hole Longitude (WGS84)'], row['Surface Hole Latitude (WGS84)']
         save_path = f"{download_folder}/{lon}_{lat}.png"
         bbox = create_bbox_from_center(lon, lat, box_size_m=5000)
@@ -165,7 +165,7 @@ def main(download_folder="downloads"):
             {'lat': lat, 'lon': lon, 'label': 1, 'file_path': save_path})
 
     # Generate random coordinates outside the bounding box and download images
-    random_coords = generate_random_coordinates_outside_bbox(10,        # TODO: change here to select the number of non-well train data
+    random_coords = generate_random_coordinates_outside_bbox(100,        # TODO: change here to select the number of non-well train data
                                                              # len(coordinates_df),
                                                              lon_min, lon_max, lat_min, lat_max)
     for lon, lat in random_coords:
