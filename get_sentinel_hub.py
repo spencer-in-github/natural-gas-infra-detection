@@ -1,6 +1,6 @@
 import io
 import os
-import pandas as pd  # Import pandas to read the CSV
+import pandas as pd
 import numpy as np
 from oauthlib.oauth2 import BackendApplicationClient
 from requests_oauthlib import OAuth2Session
@@ -12,9 +12,6 @@ CLIENT_SECRET = 'P75SqYQF0tPvX73O6ocgc4SELvWdLMda'
 
 
 def authenticate(client_id, client_secret):
-    """
-    Authenticate with Sentinel Hub and return an OAuth2 session.
-    """
     client = BackendApplicationClient(client_id=client_id)
     oauth = OAuth2Session(client=client)
     token = oauth.fetch_token(
@@ -26,18 +23,7 @@ def authenticate(client_id, client_secret):
 
 
 def create_bbox_from_center(lon, lat, box_size_m=5000):
-    """
-    Create a bounding box (bbox) given the center coordinates.
-    
-    Parameters:
-        lon (float): Longitude of the center point.
-        lat (float): Latitude of the center point.
-        box_size_m (int): Size of the box in meters (default: 5000 meters).
-    
-    Returns:
-        list: BBox in the format [min_lon, min_lat, max_lon, max_lat]
-    """
-    meters_to_deg_lat = box_size_m / 111320.0  # 1 degree latitude ~ 111.32 km
+    meters_to_deg_lat = box_size_m / 111320.0
     meters_to_deg_lon = box_size_m / (111320.0 * abs(np.cos(np.radians(lat))))
 
     min_lon = lon - meters_to_deg_lon / 2
@@ -49,9 +35,6 @@ def create_bbox_from_center(lon, lat, box_size_m=5000):
 
 
 def download_image(oauth, bbox, start_date, end_date, save_path, evalscript):
-    """
-    Download a satellite image and save it as a PNG.
-    """
     url_request = 'https://services.sentinel-hub.com/api/v1/process'
     headers_request = {
         "Authorization": f"Bearer {oauth.token['access_token']}"
@@ -79,8 +62,8 @@ def download_image(oauth, bbox, start_date, end_date, save_path, evalscript):
             ]
         },
         'output': {
-            'width': 1024, # Increase width for higher resolution 1024, 2048
-            'height': 1024, # Increase width for higher resolution
+            'width': 1024,
+            'height': 1024,
             'responses': [
                 {
                     'identifier': 'default',
@@ -106,15 +89,6 @@ def download_image(oauth, bbox, start_date, end_date, save_path, evalscript):
 
 
 def read_coordinates_from_csv(file_path):
-    """
-    Read the coordinates from the provided CSV file.
-    
-    Parameters:
-        file_path (str): Path to the CSV file.
-
-    Returns:
-        DataFrame: Pandas DataFrame with 'surface lon' and 'surface lat' columns.
-    """
     df = pd.read_csv(file_path)
     if 'Surface Hole Longitude (WGS84)' not in df.columns or 'Surface Hole Latitude (WGS84)' not in df.columns:
         raise ValueError(
@@ -122,20 +96,34 @@ def read_coordinates_from_csv(file_path):
     return df[['Surface Hole Longitude (WGS84)', 'Surface Hole Latitude (WGS84)']]
 
 
-def main():
-    # Ensure the downloads directory exists
-    os.makedirs("downloads", exist_ok=True)
+def generate_random_coordinates_outside_bbox(n, lon_min, lon_max, lat_min, lat_max):
+    # Latitude range for Texas and New Mexico
+    texas_nm_lat_range = (25.8371, 36.5007)
+    # Longitude range for Texas and New Mexico
+    texas_nm_lon_range = (-106.6456, -93.5083)
 
-    # Read the CSV file with coordinates
-    # Path to the uploaded CSV file
+    random_coords = []
+    while len(random_coords) < n:
+        lat = np.random.uniform(texas_nm_lat_range[0], texas_nm_lat_range[1])
+        lon = np.random.uniform(texas_nm_lon_range[0], texas_nm_lon_range[1])
+
+        # Check that the coordinates are outside the existing bounding box
+        if lat < lat_min or lat > lat_max or lon < lon_min or lon > lon_max:
+            random_coords.append((lon, lat))
+
+    return random_coords
+
+
+def main(download_folder="downloads"):
+    os.makedirs(download_folder, exist_ok=True)
+
+    # Load well coordinates
     csv_file = "PERMIAN BASIN Well Headers.CSV"
     coordinates_df = read_coordinates_from_csv(csv_file)
 
-    # Define the date range
+    # Define date range and evalscript
     start_date = "2024-06-01"
     end_date = "2024-08-31"
-
-    # Sentinel Hub Evalscript to define the bands
     evalscript = """
     //VERSION=3
     function setup() {
@@ -143,7 +131,7 @@ def main():
         input: ["B02", "B03", "B04"],
         output: {
           bands: 3,
-          sampleType: "AUTO" // default value - scales the output values from [0,1] to [0,255].
+          sampleType: "AUTO"
         }
       }
     }
@@ -153,23 +141,47 @@ def main():
     }
     """
 
-    # Authenticate and get OAuth session
+    # Authenticate
     oauth, token = authenticate(CLIENT_ID, CLIENT_SECRET)
 
-    # Loop through each coordinate in the CSV and download the image
-    #for index, row in coordinates_df.iterrows():
-    for index, row in coordinates_df.head(10).iterrows(): # test - run only 10 examples
+    # Get the min/max lat and lon of the well dataset
+    lon_min, lon_max = coordinates_df['Surface Hole Longitude (WGS84)'].min(
+    ), coordinates_df['Surface Hole Longitude (WGS84)'].max()
+    lat_min, lat_max = coordinates_df['Surface Hole Latitude (WGS84)'].min(
+    ), coordinates_df['Surface Hole Latitude (WGS84)'].max()
 
+    # Create label DataFrame
+    labels = []
+
+    # Download images for actual well locations
+    # TODO: remove .head(10) to download for all wells
+    for index, row in coordinates_df.head(10).iterrows():
         lon, lat = row['Surface Hole Longitude (WGS84)'], row['Surface Hole Latitude (WGS84)']
-        save_path = f"downloads/{lon}_{lat}.png"
-
-        # Create the bounding box
+        save_path = f"{download_folder}/{lon}_{lat}.png"
         bbox = create_bbox_from_center(lon, lat, box_size_m=5000)
-
-        # Download and save the image
         download_image(oauth, bbox, start_date,
                        end_date, save_path, evalscript)
+        labels.append(
+            {'lat': lat, 'lon': lon, 'label': 1, 'file_path': save_path})
+
+    # Generate random coordinates outside the bounding box and download images
+    random_coords = generate_random_coordinates_outside_bbox(10,        # TODO: change here to select the number of non-well train data
+                                                             # len(coordinates_df),
+                                                             lon_min, lon_max, lat_min, lat_max)
+    for lon, lat in random_coords:
+        save_path = f"{download_folder}/{lon}_{lat}.png"
+        bbox = create_bbox_from_center(lon, lat, box_size_m=5000)
+        download_image(oauth, bbox, start_date,
+                       end_date, save_path, evalscript)
+        labels.append(
+            {'lat': lat, 'lon': lon, 'label': 0, 'file_path': save_path})
+
+    # Save label DataFrame
+    label_df = pd.DataFrame(labels)
+    label_df.to_csv("labels.csv", index=False)
+    print("Labels saved to labels.csv")
 
 
 if __name__ == "__main__":
-    main()
+    # Pass the desired download folder when calling main
+    main(download_folder="train_outside_well_box")
