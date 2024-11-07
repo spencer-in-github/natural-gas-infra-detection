@@ -4,3 +4,5 @@
 4. Comment out line 161 and uncomment line 160, so that we download for all wells in the PERMIAN BASIN csv files
 5. [TODO] create label geojson data
 6. [TODO] add places without well (satellite images and labels) into the trainset
+
+***The code can't download images consistently due to the expiration of the token.
