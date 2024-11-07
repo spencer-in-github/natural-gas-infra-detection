@@ -5,4 +5,4 @@
 5. [TODO] create label geojson data
 6. [TODO] add places without well (satellite images and labels) into the trainset
 
-***The code can't download images consistently due to the expiration of the token.
+***The code can't download images consistently due to the expiration of the token. The latest version is Data_Download_v1.py, in which the refresh of token is added, but it seems not working well.
