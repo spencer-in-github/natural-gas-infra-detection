@@ -5,12 +5,16 @@ import numpy as np
 import geopandas as gpd
 from shapely.geometry import box, Point
 import json
+import time  # Import time module for timing
 
 PATH_WELL = "PERMIAN BASIN Well Headers.CSV"
 PATH_TRAIN_IMAGE = "test_download"
-
+N_EXAMPLE = None # None creates labels for all; define dataset size
 
 def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100):
+    # Start the timer
+    start_time = time.time()
+
     os.makedirs(download_folder, exist_ok=True)
 
     if n_example is not None:
@@ -35,6 +39,8 @@ def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100)
             # Create a 5km x 5km bounding box for each grid cell
             grid_cells.append(box(lon, lat, lon + lon_step, lat + lat_step))
 
+    print(f"---- A total of {len(grid_cells)} grid cells created. ----")
+
     well_polygons = []
     for _, row in wells_df.iterrows():
         lat, lon = row['Surface Hole Latitude (WGS84)'], row['Surface Hole Longitude (WGS84)']
@@ -45,11 +51,16 @@ def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100)
                            lon + lon_offset, lat + lat_offset)
         well_polygons.append(well_polygon)
 
+    print(f"---- A total of {len(well_polygons)} well polygons created. ----")
+
     # Prepare the COCO-style annotation structure
     annotations = []
     images = []
     annotation_id = 0
     category_id = 1  # Category ID for wells
+
+    # Initialize a list to hold DenseNet label data
+    densenet_labels = []
 
     for grid_id, grid_cell in enumerate(grid_cells):
         # Get the top-left corner coordinates of the grid cell for naming
@@ -61,11 +72,6 @@ def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100)
         # Check if any well polygon is within the grid cell
         wells_in_cell = [
             well for well in well_polygons if well.intersects(grid_cell)]
-
-        # Print message indicating the number of wells in the grid cell
-        if len(wells_in_cell) > 1:
-            print(
-                f"-- Grid cell {grid_id} ({top_left_lat:.7f}, {top_left_lon:.7f}) contains {len(wells_in_cell)} wells. --")
 
         # Define the bounding box for the grid cell in COCO format [x_min, y_min, width, height]
         grid_bbox = [grid_cell.bounds[0], grid_cell.bounds[1],
@@ -93,6 +99,23 @@ def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100)
                 "iscrowd": 0
             })
             annotation_id += 1
+        
+        # DenseNet label creation: Use top-left corner coordinates, count wells, and label
+        well_count = len(wells_in_cell)
+        label = 1 if well_count > 0 else 0
+
+        # Print message indicating the number of wells in the grid cell
+        if well_count > 1:
+            print(
+                f"-- Grid cell {grid_id} ({top_left_lat:.7f}, {top_left_lon:.7f}) contains {well_count} wells. --")
+
+        densenet_labels.append({
+            "lat": top_left_lat,
+            "lon": top_left_lon,
+            "label": label,
+            "count": well_count,
+            "file_path": image_filename
+        })
 
     # Define the COCO-format data structure
     coco_format = {
@@ -110,7 +133,18 @@ def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100)
 
     print(f"COCO labels saved to {output_path}")
 
+    # Create and save the DenseNet labels DataFrame
+    densenet_df = pd.DataFrame(densenet_labels)
+    densenet_output_path = "DenseNet_labels.csv"
+    densenet_df.to_csv(densenet_output_path, index=False)
+    print(f"DenseNet labels saved to {densenet_output_path}")
+
+    # End the timer and print the elapsed time
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Program completed in {elapsed_time:.2f} seconds.")
+
 
 if __name__ == "__main__":
     # Pass the desired download folder when calling main
-    main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=1000)
+    main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=N_EXAMPLE)
