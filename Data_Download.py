@@ -11,6 +11,7 @@ import json
 CLIENT_ID = 'd7f7b946-16c7-4d7b-ac9d-9fa8c5a775e4'
 CLIENT_SECRET = 'P75SqYQF0tPvX73O6ocgc4SELvWdLMda'
 
+
 def authenticate(client_id, client_secret):
     client = BackendApplicationClient(client_id=client_id)
     oauth = OAuth2Session(client=client)
@@ -111,16 +112,18 @@ def main(label_file, download_folder="downloads"):
         # Extract bounding box and file name
         bbox = image_info['bbox']
         file_name = image_info['file_name']
-        
+
         # Convert bbox to (min_lon, min_lat, max_lon, max_lat)
         min_lon, min_lat, width, height = bbox
         max_lon = min_lon + width
         max_lat = min_lat + height
         bbox_coordinates = (min_lon, min_lat, max_lon, max_lat)
-        
+
         # Download the image and save it with the specified file name
-        download_image(oauth, bbox_coordinates, start_date, end_date, file_name, evalscript)
+        download_image(oauth, bbox_coordinates, start_date,
+                       end_date, file_name, evalscript)
+
 
 if __name__ == "__main__":
     # Pass the desired download folder when calling main
-    main(label_file = "COCO_labels.json", download_folder="test_download")
+    main(label_file="COCO_labels.json", download_folder="test_download")

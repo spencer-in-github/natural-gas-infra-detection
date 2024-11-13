@@ -1,150 +1,163 @@
-import io
 import os
 import pandas as pd
 import numpy as np
 import geopandas as gpd
-from shapely.geometry import box, Point
+from shapely.geometry import box
 import json
-import time  # Import time module for timing
+import time
 
 PATH_WELL = "PERMIAN BASIN Well Headers.CSV"
 PATH_TRAIN_IMAGE = "test_download"
-N_EXAMPLE = None # None creates labels for all; define dataset size
+N_EXAMPLE = None  # None creates labels for all; define dataset size
 
-def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100):
+# Define conversion constants (approximate)
+KM_TO_DEG_LAT = 1 / 111  # 1 degree latitude ≈ 111 km
+# 1 degree longitude ≈ 111 km at the equator (adjusted by latitude)
+KM_TO_DEG_LON = 1 / 111
+
+
+def main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=100, image_length_km=5):
     # Start the timer
     start_time = time.time()
 
     os.makedirs(download_folder, exist_ok=True)
 
+    # Load wells data and limit rows if n_example is specified
+    wells_df = pd.read_csv(well_header)
     if n_example is not None:
-        wells_df = pd.read_csv(well_header).head(n_example)
-    else:
-        wells_df = pd.read_csv(well_header)
+        wells_df = wells_df.head(n_example)
 
-    # create basin bounding box
+    # Create a GeoDataFrame with well locations as 50m x 50m boxes
+    wells_gdf = gpd.GeoDataFrame(
+        wells_df,
+        geometry=[
+            box(lon - 0.00045, lat - 0.00045, lon + 0.00045, lat + 0.00045)
+            for lat, lon in zip(
+                wells_df['Surface Hole Latitude (WGS84)'],
+                wells_df['Surface Hole Longitude (WGS84)']
+            )
+        ],
+        crs="EPSG:4326"
+    )
+
+    # Create basin bounding box
     min_lat = wells_df['Surface Hole Latitude (WGS84)'].min()
     max_lat = wells_df['Surface Hole Latitude (WGS84)'].max()
     min_lon = wells_df['Surface Hole Longitude (WGS84)'].min()
     max_lon = wells_df['Surface Hole Longitude (WGS84)'].max()
 
-    # Define step sizes for 5km x 5km grid in degrees (approximation for simplicity)
-    lat_step = 0.045  # Roughly 5km in latitude
-    lon_step = 0.045  # Roughly 5km in longitude
+    # Calculate step sizes based on image length in kilometers
+    lat_step = image_length_km * KM_TO_DEG_LAT
+    lon_step = image_length_km * KM_TO_DEG_LON
 
-    # Generate grid cells
+    # Generate grid cells and their GeoDataFrame
     grid_cells = []
+    grid_ids = []
+    lat_lons = []
     for lat in np.arange(min_lat, max_lat, lat_step):
         for lon in np.arange(min_lon, max_lon, lon_step):
-            # Create a 5km x 5km bounding box for each grid cell
             grid_cells.append(box(lon, lat, lon + lon_step, lat + lat_step))
+            grid_ids.append(f"{lat:.7f}_{lon:.7f}")
+            lat_lons.append((lat, lon))
 
-    print(f"---- A total of {len(grid_cells)} grid cells created. ----")
+    grid_gdf = gpd.GeoDataFrame(
+        {"grid_id": grid_ids, "geometry": grid_cells, "lat_lon": lat_lons},
+        crs="EPSG:4326"
+    )
 
-    well_polygons = []
-    for _, row in wells_df.iterrows():
-        lat, lon = row['Surface Hole Latitude (WGS84)'], row['Surface Hole Longitude (WGS84)']
-        # Convert 50m to degrees approximately for both latitude and longitude
-        lat_offset = 0.00045  # Approx 50m in latitude
-        lon_offset = 0.00045  # Approx 50m in longitude
-        well_polygon = box(lon - lon_offset, lat - lat_offset,
-                           lon + lon_offset, lat + lat_offset)
-        well_polygons.append(well_polygon)
+    print(
+        f"---- A total of {len(grid_gdf)} grid cells created with a box size of {image_length_km} km ----")
 
-    print(f"---- A total of {len(well_polygons)} well polygons created. ----")
+    # Spatial join to find wells in each grid cell
+    wells_in_cells = gpd.sjoin(
+        wells_gdf, grid_gdf, how="left", predicate="intersects")
 
-    # Prepare the COCO-style annotation structure
+    wells_in_cells.to_csv("wells_in_cells.csv")
+
+    # Prepare data structures for COCO and DenseNet labels
     annotations = []
     images = []
-    annotation_id = 0
-    category_id = 1  # Category ID for wells
-
-    # Initialize a list to hold DenseNet label data
     densenet_labels = []
+    annotation_id = 0
+    category_id = 1
 
-    for grid_id, grid_cell in enumerate(grid_cells):
-        # Get the top-left corner coordinates of the grid cell for naming
-        top_left_lat, top_left_lon = grid_cell.bounds[3], grid_cell.bounds[0]
+    # Iterate over grid cells and assign wells to COCO/DenseNet
+    for grid_id, grid_row in grid_gdf.iterrows():
+        # Get top-left corner lat/lon for filename
+        lat, lon = grid_row["lat_lon"]
+        file_name = f"{download_folder}/{lat:.7f}_{lon:.7f}.jpg"
 
-        # Format the filename using the latitude and longitude of the grid cell's top-left corner
-        image_filename = f"{download_folder}/{top_left_lat:.7f}_{top_left_lon:.7f}.jpg"
+        # Find wells in the current grid cell
+        cell_wells = wells_in_cells[wells_in_cells["grid_id"]
+                                    == grid_row["grid_id"]]
+        well_count = len(cell_wells)
+        label = 1 if well_count > 0 else 0  # Set label to 0 if no wells are found
 
-        # Check if any well polygon is within the grid cell
-        wells_in_cell = [
-            well for well in well_polygons if well.intersects(grid_cell)]
+        # Print the well count if there are wells in the grid cell
+        if well_count > 1:
+            print(f"-- {well_count} wells in grid {lat:.7f} {lon:.7f} --")
+        elif well_count == 0:
+            print(f"------- No wells in grid {lat:.7f} {lon:.7f} ------")
 
-        # Define the bounding box for the grid cell in COCO format [x_min, y_min, width, height]
-        grid_bbox = [grid_cell.bounds[0], grid_cell.bounds[1],
-                     grid_cell.bounds[2] - grid_cell.bounds[0],  # width
-                     grid_cell.bounds[3] - grid_cell.bounds[1]]  # height
-
-        # Add image information for this grid cell, including the bounding box
+        # Append image information for COCO
         images.append({
             "id": grid_id,
-            "file_name": image_filename,
-            "width": 1024,  # Example width in pixels
-            "height": 1024,  # Example height in pixels
-            "bbox": grid_bbox
+            "file_name": file_name,
+            "width": 1024,
+            "height": 1024,
+            "bbox": [grid_row.geometry.bounds[0], grid_row.geometry.bounds[1],
+                     grid_row.geometry.bounds[2] - grid_row.geometry.bounds[0],
+                     grid_row.geometry.bounds[3] - grid_row.geometry.bounds[1]]
         })
 
-        # Add annotation for each well in this grid cell
-        for well in wells_in_cell:
-            x_min, y_min, x_max, y_max = well.bounds
-            annotations.append({
-                "id": annotation_id,
-                "image_id": grid_id,
-                "category_id": category_id,
-                "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
-                "area": (x_max - x_min) * (y_max - y_min),
-                "iscrowd": 0
-            })
-            annotation_id += 1
-        
-        # DenseNet label creation: Use top-left corner coordinates, count wells, and label
-        well_count = len(wells_in_cell)
-        label = 1 if well_count > 0 else 0
+        # Append well annotations for COCO if there are wells in the grid cell
+        if well_count > 0:
+            for _, well_row in cell_wells.iterrows():
+                x_min, y_min, x_max, y_max = well_row.geometry.bounds
+                annotations.append({
+                    "id": annotation_id,
+                    "image_id": grid_id,
+                    "category_id": category_id,
+                    "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
+                    "area": (x_max - x_min) * (y_max - y_min),
+                    "iscrowd": 0
+                })
+                annotation_id += 1
 
-        # Print message indicating the number of wells in the grid cell
-        if well_count > 1:
-            print(
-                f"-- Grid cell {grid_id} ({top_left_lat:.7f}, {top_left_lon:.7f}) contains {well_count} wells. --")
-
+        # Append DenseNet label with label = 0 for grid cells without wells
         densenet_labels.append({
-            "lat": top_left_lat,
-            "lon": top_left_lon,
+            "lat": lat,
+            "lon": lon,
             "label": label,
             "count": well_count,
-            "file_path": image_filename
+            "file_path": file_name
         })
 
-    # Define the COCO-format data structure
+    # Save COCO format
     coco_format = {
         "images": images,
         "annotations": annotations,
-        "categories": [
-            {"id": category_id, "name": "well"}
-        ]
+        "categories": [{"id": category_id, "name": "well"}]
     }
-
-    # Save the COCO-format data to a JSON file
-    output_path = "COCO_labels.json"
-    with open(output_path, "w") as f:
+    with open("COCO_labels.json", "w") as f:
         json.dump(coco_format, f)
+    print("COCO labels saved to COCO_labels.json")
 
-    print(f"COCO labels saved to {output_path}")
-
-    # Create and save the DenseNet labels DataFrame
+    # Save DenseNet labels to CSV
     densenet_df = pd.DataFrame(densenet_labels)
-    densenet_output_path = "DenseNet_labels.csv"
-    densenet_df.to_csv(densenet_output_path, index=False)
-    print(f"DenseNet labels saved to {densenet_output_path}")
+    densenet_df.to_csv("DenseNet_labels.csv", index=False)
+    print("DenseNet labels saved to DenseNet_labels.csv")
 
-    # End the timer and print the elapsed time
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    print(f"Program completed in {elapsed_time:.2f} seconds.")
+    # Print the elapsed time
+    elapsed_time = time.time() - start_time
+    # Calculate elapsed time in minutes and seconds
+    minutes = int(elapsed_time // 60)
+    seconds = int(elapsed_time % 60)
+
+    # Print the elapsed time in "X minutes and Y seconds" format
+    print(f"Program completed in {minutes} minutes {seconds} seconds.")
 
 
 if __name__ == "__main__":
-    # Pass the desired download folder when calling main
-    main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE, n_example=N_EXAMPLE)
+    main(well_header=PATH_WELL, download_folder=PATH_TRAIN_IMAGE,
+         n_example=N_EXAMPLE, image_length_km=5)
