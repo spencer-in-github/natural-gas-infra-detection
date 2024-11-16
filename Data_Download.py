@@ -8,8 +8,8 @@ from PIL import Image
 import json
 
 # Your Sentinel Hub client credentials
-CLIENT_ID = 'd7f7b946-16c7-4d7b-ac9d-9fa8c5a775e4'
-CLIENT_SECRET = 'P75SqYQF0tPvX73O6ocgc4SELvWdLMda'
+CLIENT_ID = '06b04b38-522f-41bd-a399-72ec52eb67a3'
+CLIENT_SECRET = 'sp4FNXBnv2k7TxFmYyUw2JH5QBx1BbUf'
 
 
 def authenticate(client_id, client_secret):
@@ -21,6 +21,14 @@ def authenticate(client_id, client_secret):
         include_client_id=True
     )
     return oauth, token
+
+
+def refresh_token(oauth):
+    # Refresh the token by re-authenticating
+    global CLIENT_ID, CLIENT_SECRET
+    print("Refreshing token...")
+    oauth, token = authenticate(CLIENT_ID, CLIENT_SECRET)
+    return oauth
 
 
 def download_image(oauth, bbox, start_date, end_date, save_path, evalscript):
@@ -65,16 +73,26 @@ def download_image(oauth, bbox, start_date, end_date, save_path, evalscript):
         'evalscript': evalscript
     }
 
-    response = oauth.post(
-        url_request, headers=headers_request, json=json_request)
+    while True:
+        try:
+            response = oauth.post(
+                url_request, headers=headers_request, json=json_request)
 
-    if response.status_code == 200:
-        img = Image.open(io.BytesIO(response.content))
-        img.save(save_path)
-        print(f"Image saved as {save_path}")
-    else:
-        print(f"Failed to fetch image. Status code: {response.status_code}")
-        print(f"Response content: {response.content}")
+            if response.status_code == 200:
+                img = Image.open(io.BytesIO(response.content))
+                img.save(save_path)
+                print(f"Image saved as {save_path}")
+                return True
+            elif response.status_code == 401:  # Token expired
+                oauth = refresh_token(oauth)
+            else:
+                print(
+                    f"Failed to fetch image. Status code: {response.status_code}")
+                print(f"Response content: {response.content}")
+                return False
+        except Exception as e:
+            print(f"Error during download: {e}")
+            time.sleep(5)  # Retry after a short delay
 
 
 def main(label_file, download_folder="downloads"):
@@ -112,6 +130,12 @@ def main(label_file, download_folder="downloads"):
         # Extract bounding box and file name
         bbox = image_info['bbox']
         file_name = image_info['file_name']
+        save_path = os.path.join(download_folder, file_name)
+
+        # Check if the file already exists
+        if os.path.exists(save_path):
+            print(f"File {file_name} already exists. Skipping download.")
+            continue
 
         # Convert bbox to (min_lon, min_lat, max_lon, max_lat)
         min_lon, min_lat, width, height = bbox
@@ -119,9 +143,11 @@ def main(label_file, download_folder="downloads"):
         max_lat = min_lat + height
         bbox_coordinates = (min_lon, min_lat, max_lon, max_lat)
 
-        # Download the image and save it with the specified file name
-        download_image(oauth, bbox_coordinates, start_date,
-                       end_date, file_name, evalscript)
+        # Download the image
+        success = download_image(
+            oauth, bbox_coordinates, start_date, end_date, save_path, evalscript)
+        if not success:
+            print(f"Failed to download {file_name}. Moving to next.")
 
 
 if __name__ == "__main__":
