@@ -6,6 +6,7 @@ from oauthlib.oauth2 import BackendApplicationClient
 from requests_oauthlib import OAuth2Session
 from PIL import Image
 import json
+import time 
 
 # Your Sentinel Hub client credentials
 CLIENT_ID = '06b04b38-522f-41bd-a399-72ec52eb67a3'
@@ -130,7 +131,7 @@ def main(label_file, download_folder="downloads"):
         # Extract bounding box and file name
         bbox = image_info['bbox']
         file_name = image_info['file_name']
-        save_path = os.path.join(download_folder, file_name)
+        save_path = file_name
 
         # Check if the file already exists
         if os.path.exists(save_path):
