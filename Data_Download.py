@@ -82,17 +82,17 @@ def download_image(oauth, bbox, start_date, end_date, save_path, evalscript):
             if response.status_code == 200:
                 img = Image.open(io.BytesIO(response.content))
                 img.save(save_path)
-                print(f"Image saved as {save_path}")
+                print(f"Image saved as {save_path}", flush=True)
                 return True
             elif response.status_code == 401:  # Token expired
                 oauth = refresh_token(oauth)
             else:
                 print(
-                    f"Failed to fetch image. Status code: {response.status_code}")
-                print(f"Response content: {response.content}")
+                    f"Failed to fetch image. Status code: {response.status_code}", flush=True)
+                print(f"Response content: {response.content}", flush=True)
                 return False
         except Exception as e:
-            print(f"Error during download: {e}")
+            print(f"Error during download: {e}", flush=True)
             time.sleep(5)  # Retry after a short delay
 
 
@@ -126,17 +126,24 @@ def main(label_file, download_folder="downloads"):
     # Authenticate
     oauth, token = authenticate(CLIENT_ID, CLIENT_SECRET)
 
-    # Iterate through each image entry in the JSON
-    for image_info in coco_data['images']:
+    # Get the latest modified file in the download folder
+    existing_files = [f for f in os.listdir(download_folder) if os.path.isfile(os.path.join(download_folder, f))]
+    if existing_files:
+        latest_file = max(existing_files, key=lambda f: os.path.getmtime(os.path.join(download_folder, f)))
+        latest_position = next(
+            (index for index, img in enumerate(coco_data['images']) if img['file_name'] == os.path.join(download_folder, latest_file)), 0)
+        print(f"Resuming from position: {latest_position}, file: {latest_file}", flush=True)
+    else:
+        latest_position = 0
+        print("No existing files found. Starting from the beginning.", flush=True)
+
+    # Iterate through each image entry in the JSON from the determined position
+    for image_info in coco_data['images'][latest_position:]:
         # Extract bounding box and file name
         bbox = image_info['bbox']
         file_name = image_info['file_name']
-        save_path = file_name
-
-        # Check if the file already exists
-        if os.path.exists(save_path):
-            print(f"File {file_name} already exists. Skipping download.")
-            continue
+        #save_path = os.path.join(download_folder, file_name)
+        save_path= file_name
 
         # Convert bbox to (min_lon, min_lat, max_lon, max_lat)
         min_lon, min_lat, width, height = bbox
@@ -148,8 +155,8 @@ def main(label_file, download_folder="downloads"):
         success = download_image(
             oauth, bbox_coordinates, start_date, end_date, save_path, evalscript)
         if not success:
-            print(f"Failed to download {file_name}. Moving to next.")
-
+            print(f"Failed to download {file_name}. Moving to next.", flush=True)
+            
 
 if __name__ == "__main__":
     # Pass the desired download folder when calling main
