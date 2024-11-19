@@ -10,4 +10,4 @@ ml py-numpy/1.24.2_py39
 ml py-pytorch/2.0.0_py39
 ml py-torchvision/0.15.1_py39
 
-python3 test.py
+python3 Densenet.py

@@ -29,8 +29,8 @@ densenet = densenet.to(device)
 # =============================================================================
 
 # Read all data
-images = torch.load('preprocessed_images_1K.pt')
-labels = torch.load('labels_1K.pt')
+images = torch.load('preprocessed_images.pt')
+labels = torch.load('labels.pt')
 data_all = TensorDataset(images, labels)
 
 # Split data
