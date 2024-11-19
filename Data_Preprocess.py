@@ -12,16 +12,21 @@ class LocationDataset(Dataset):
         self.img_dir = img_dir
         self.transform = transform
 
+        # Get available image paths in the directory
+        available_images = set(os.path.join("test_download", f) for f in os.listdir(img_dir))
+
+        self.labels_df = self.labels_df[self.labels_df['file_path'].isin(available_images)]
+
+        print(f"Remaining labels: {len(self.labels_df)}", flush=True)
+
     def __len__(self):
         # Number of images
         return len(self.labels_df)
 
     def __getitem__(self, idx):
-        # Get x and y coordinates from the CSV
-        y, x, label, img_location = self.labels_df.iloc[idx]
-        # Construct image file name based on x_y format
-        img_name = f"{x}_{y}.png"
-        img_path = os.path.join(self.img_dir, img_name)
+        # Get data from the filtered DataFrame
+        y, x, label, _, img_location = self.labels_df.iloc[idx]
+        img_path = img_location
         
         # Load image
         image = Image.open(img_path).convert("RGB")
@@ -34,8 +39,8 @@ class LocationDataset(Dataset):
         return image, torch.tensor(label)
 
 # Example usage:
-img_dir = "./Test_Folder"
-csv_file = "./labels.csv"
+img_dir = "./test_download"
+csv_file = "./DenseNet_labels.csv"
 
 # Define any transformations (resize, normalize, etc.)
 transform = transforms.Compose([
